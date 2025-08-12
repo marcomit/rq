@@ -11,31 +11,102 @@ import (
 )
 
 func main() {
-	fmt.Println("Usage: rq dock create <name of dock>")
 	args := os.Args[1:]
+	if len(args) == 0 {
+		printUsage()
+		os.Exit(1)
+	}
 	parseArgs(args)
 }
 
-func parseArgs(args []string) {
-	if len(args) == 0 {
-		fmt.Println("Invalid arguments")
-		os.Exit(1)
-	}
+func printUsage() {
+	fmt.Println("rq - A simple, powerful CLI for API testing")
+	fmt.Println()
+	fmt.Println("Usage:")
+	fmt.Println("  rq dock init <name>         Create a new dock")
+	fmt.Println("  rq dock list                List available docks")
+	fmt.Println("  rq dock use <name>          Switch to a dock")
+	fmt.Println("  rq new <name>               Create a new HTTP request")
+	fmt.Println("  rq run <name>               Execute an HTTP request")
+	fmt.Println("  rq run <name> --env <env>   Execute with specific environment")
+	fmt.Println("  rq run <name> -o <file>     Save response to file")
+}
 
-	fmt.Println(args)
+func parseArgs(args []string) {
 	switch args[0] {
 	case "dock":
-		fmt.Println("Parsing dock")
+		if len(args) < 2 {
+			fmt.Println("Error: dock command requires subcommand")
+			os.Exit(1)
+		}
 		dock.Parse(args[1:])
+
 	case "new":
+		if len(args) < 2 {
+			fmt.Println("Error: new command requires request name")
+			os.Exit(1)
+		}
 		ctx := dock.GetContext()
-		request.New(ctx, args[1], "http")
+		err := request.New(ctx, args[1], "http")
+		if err != nil {
+			fmt.Printf("Error creating request: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Created request: %s.http\n", args[1])
 
 	case "run":
-		fmt.Println(args)
+		if len(args) < 2 {
+			fmt.Println("Error: run command requires request name")
+			os.Exit(1)
+		}
+
 		ctx := dock.GetContext()
-		request.Run(ctx, args[1])
+		requestName := args[1]
+
+		// Parse flags
+		options := request.ExecuteOptions{}
+		i := 2
+		for i < len(args) {
+			switch args[i] {
+			case "--env":
+				if i+1 >= len(args) {
+					fmt.Println("Error: --env requires environment name")
+					os.Exit(1)
+				}
+				options.Environment = args[i+1]
+				i += 2
+			case "-o", "--output":
+				if i+1 >= len(args) {
+					fmt.Println("Error: -o requires output file")
+					os.Exit(1)
+				}
+				options.OutputFile = args[i+1]
+				i += 2
+			case "--output-body":
+				options.OutputBodyOnly = true
+				i++
+			default:
+				fmt.Printf("Error: unknown flag %s\n", args[i])
+				os.Exit(1)
+			}
+		}
+
+		// Execute request
+		var err error
+		if options.Environment != "" || options.OutputFile != "" {
+			err = request.EvaluateWithOptions(ctx, requestName, options)
+		} else {
+			err = request.Evaluate(ctx, requestName)
+		}
+
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+
 	default:
-		fmt.Println("Invalid rq command")
+		fmt.Printf("Error: unknown command '%s'\n", args[0])
+		printUsage()
+		os.Exit(1)
 	}
 }

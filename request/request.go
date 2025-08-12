@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"rq/dock"
+	"rq/variable"
 	"strings"
 )
 
@@ -38,17 +39,13 @@ func Run(ctx *dock.RqContext, path string) {
 		fmt.Println("Request", path, "not found")
 	case 1:
 		fmt.Println("Run request")
-		break
+		Evaluate(ctx, path)
 	default:
 		fmt.Println("Multiple requests detected:")
 		for i := range requests {
 			fmt.Println(i, ".", requests[i])
 		}
 	}
-}
-
-func Evaluate() {
-
 }
 
 func retrieveRequests(path string, req string) ([]string, error) {
@@ -88,4 +85,54 @@ func retrieveRequests(path string, req string) ([]string, error) {
 		}
 	}
 	return res, nil
+}
+func EvaluateWithOptions(ctx *dock.RqContext, request string, options ExecuteOptions) error {
+	requestPath := filepath.Join(ctx.Dock, request)
+	if !strings.HasSuffix(requestPath, ".http") {
+		requestPath += ".http"
+	}
+
+	var config map[string]string
+	var err error
+	if options.Environment != "" {
+		config, err = ctx.GetConfigForEnv(filepath.Dir(request), options.Environment)
+	} else {
+		config, err = ctx.GetConfig(filepath.Dir(request))
+	}
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	resolver := variable.NewVariableResolver(config)
+	content, err := resolver.ResolveFile(requestPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve variables in request: %w", err)
+	}
+
+	httpReq, err := ParseHttpRequest(content)
+	if err != nil {
+		return fmt.Errorf("failed to parse HTTP request: %w", err)
+	}
+
+	fmt.Printf("Executing %s %s\n", httpReq.Method, httpReq.URL)
+	response, err := httpReq.Execute()
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
+
+	if options.OutputFile != "" {
+		if options.OutputBodyOnly {
+			err = os.WriteFile(options.OutputFile, []byte(response.Body), 0644)
+		} else {
+			err = response.SaveToFile(options.OutputFile)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to save output: %w", err)
+		}
+		fmt.Printf("Response saved to %s\n", options.OutputFile)
+	} else {
+		response.Print()
+	}
+
+	return nil
 }
