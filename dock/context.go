@@ -7,45 +7,44 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 type RqContext struct {
-	Path []string
+	Path string
 	Dock string
 }
 
 func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil || !os.IsNotExist(err)
+	_, err := os.Stat(filepath.Clean(path))
+	return err == nil
 }
 
 func validatePath(path string, predicate func(string) bool) []string {
-	sep := string(os.PathSeparator)
-	paths := strings.Split(path, sep)
-
-	length := len(paths)
-
 	res := []string{}
 
-	for i := length; i > 0; i-- {
-		curr := strings.Join(paths[0:i], sep)
-		if predicate(curr) {
-			res = append(res, curr)
+	for {
+		if predicate(path) {
+			res = append(res, path)
 		}
+
+		parent := filepath.Dir(path)
+
+		if parent == path {
+			break
+		}
+
+		path = parent
 	}
 
 	return res
 }
 
-func (ctx *RqContext) GetPath() string {
-	return filepath.Join(ctx.Path...)
-}
-
 func (ctx *RqContext) IsValidDock() bool {
 
-	res := validatePath(ctx.GetPath(), func(curr string) bool {
-		return exists(filepath.Join(curr, ".dock"))
+	res := validatePath(ctx.Path, func(curr string) bool {
+		path := filepath.Join(curr, ".dock")
+
+		return exists(path)
 	})
 
 	return len(res) > 0
@@ -53,7 +52,7 @@ func (ctx *RqContext) IsValidDock() bool {
 
 func (ctx *RqContext) GetDockRoot() (string, error) {
 
-	res := validatePath(ctx.GetPath(), func(curr string) bool {
+	res := validatePath(ctx.Path, func(curr string) bool {
 		return exists(filepath.Join(curr, ".dock"))
 	})
 
@@ -65,21 +64,29 @@ func (ctx *RqContext) GetDockRoot() (string, error) {
 }
 
 func (ctx *RqContext) GetConfig(path string) map[string]string {
-
 	configs := make(map[string]string)
 
 	return configs
 }
 
+func (ctx *RqContext) setDockRoot(path string) {
+	root, err := ctx.GetDockRoot()
+
+	if err != nil {
+		fmt.Println(ctx.Path, "is not a valid RQ environment")
+		os.Exit(1)
+	}
+	ctx.Path = root
+}
+
 func GetContext() *RqContext {
 	path, _ := os.Getwd()
 
-	ctx := &RqContext{strings.Split(path, string(os.PathSeparator)), ""}
-	if !ctx.IsValidDock() {
-		fmt.Println(path, "is not a valid RQ environment")
-	}
+	path = filepath.Clean(path)
 
-	ctx.Dock, _ = ctx.GetDockRoot()
+	ctx := &RqContext{path, ""}
+
+	ctx.setDockRoot(path)
 
 	return ctx
 }

@@ -28,7 +28,13 @@ func parseArgs(args []string) {
 		fmt.Println("Parsing dock")
 		dock.Parse(args[1:])
 	case "new":
-		request.Parse(args[1:])
+		ctx := dock.GetContext()
+		request.New(ctx, args[1], "http")
+
+	case "run":
+		fmt.Println(args)
+		ctx := dock.GetContext()
+		request.Run(ctx, args[1])
 	default:
 		fmt.Println("Invalid rq command")
 	}

@@ -6,36 +6,38 @@ package request
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"rq/dock"
 	"strings"
 )
 
-func Parse(args []string) {
-	if len(args) == 0 {
-		fmt.Println("Invalid arguments")
-		return
+func New(ctx *dock.RqContext, file string, protocol string) error {
+	wd := ctx.Path
+
+	f, err := os.Create(filepath.Join(wd, file+".http"))
+
+	if err != nil {
+		return err
 	}
 
-	switch args[0] {
-	case "new":
+	f.WriteString(`GET {{BASE_URL}}/api {{HTTP_VERSION}}
+`)
 
-	case "run":
-		ctx := dock.GetContext()
-		run(ctx, args)
-	}
+	return nil
 }
 
-func run(ctx *dock.RqContext, args []string) {
-	requests, err := retrieveRequests(ctx.GetPath(), args[1])
+func Run(ctx *dock.RqContext, path string) {
+	fmt.Println("Path ", path)
+	requests, err := retrieveRequests(ctx.Path, path)
 	if err != nil {
-		fmt.Println("Error")
+		fmt.Println("Error", err)
 		os.Exit(1)
 	}
 	switch len(requests) {
 	case 0:
-		fmt.Println("Request", args[1], "not found")
+		fmt.Println("Request", path, "not found")
 	case 1:
-		// Do the request
+		fmt.Println("Run request")
 		break
 	default:
 		fmt.Println("Multiple requests detected:")
@@ -45,21 +47,44 @@ func run(ctx *dock.RqContext, args []string) {
 	}
 }
 
+func Evaluate() {
+
+}
+
 func retrieveRequests(path string, req string) ([]string, error) {
 	entries, err := os.ReadDir(path)
+	sep := string(os.PathSeparator)
 	if err != nil {
 		return []string{}, err
 	}
 
 	res := []string{}
 
-	for i := range entries {
-		if entries[i].IsDir() {
+	reqpath := strings.Split(req, sep)
+
+	req = reqpath[0]
+
+	for _, entry := range entries {
+		if len(reqpath) == 1 && !entry.IsDir() {
 			continue
 		}
-		fileinfo := strings.Split(entries[i].Name(), ".")
-		if fileinfo[i] == req {
-			res = append(res, entries[i].Name())
+
+		fileinfo := strings.Split(entry.Name(), ".")
+		if fileinfo[0] == req {
+
+			if len(reqpath) == 1 {
+				res = append(res, entry.Name())
+			} else {
+				subpath := filepath.Join(path, entry.Name())
+
+				reqs, e := retrieveRequests(subpath, strings.Join(reqpath[1:], sep))
+
+				if e != nil {
+					return res, e
+				}
+
+				res = append(res, reqs...)
+			}
 		}
 	}
 	return res, nil
