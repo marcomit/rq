@@ -9,14 +9,14 @@ import (
 	"path/filepath"
 )
 
-func parseDock(args []string) {
+func Parse(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Invalid dock parameter")
 		os.Exit(1)
 	}
 
 	switch args[0] {
-	case "create":
+	case "init":
 		if len(args) < 2 {
 			fmt.Println("Expected dock name")
 			break
@@ -29,7 +29,7 @@ func parseDock(args []string) {
 		break
 
 	default:
-		fmt.Println("Invalid dock command")
+		fmt.Println("Default: Invalid dock command")
 	}
 }
 
@@ -53,7 +53,7 @@ func createDock(name string) {
 		return
 	}
 
-	dock, err := os.Create(filepath.Join(name, "dock"))
+	dock, err := os.Create(filepath.Join(name, ".dock"))
 
 	if err != nil {
 		return
@@ -66,7 +66,7 @@ func createDock(name string) {
 		return
 	}
 
-	_, envErr := os.Create(filepath.Join(name, "env"))
+	_, envErr := os.Create(filepath.Join(name, ".env"))
 
 	if envErr != nil {
 		fmt.Println("Error saving the default env")

@@ -6,6 +6,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"rq/dock"
+	"rq/request"
 )
 
 func main() {
@@ -20,11 +22,13 @@ func parseArgs(args []string) {
 		os.Exit(1)
 	}
 
+	fmt.Println(args)
 	switch args[0] {
 	case "dock":
-		break
+		fmt.Println("Parsing dock")
+		dock.Parse(args[1:])
 	case "new":
-
+		request.Parse(args[1:])
 	default:
 		fmt.Println("Invalid rq command")
 	}

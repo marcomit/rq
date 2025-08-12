@@ -71,10 +71,10 @@ func (ctx *RqContext) GetConfig(path string) map[string]string {
 	return configs
 }
 
-func GetContext() RqContext {
+func GetContext() *RqContext {
 	path, _ := os.Getwd()
 
-	ctx := RqContext{strings.Split(path, string(os.PathSeparator)), ""}
+	ctx := &RqContext{strings.Split(path, string(os.PathSeparator)), ""}
 	if !ctx.IsValidDock() {
 		fmt.Println(path, "is not a valid RQ environment")
 	}
