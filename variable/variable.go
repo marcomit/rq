@@ -8,6 +8,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type VariableResolver struct {
@@ -21,6 +23,33 @@ func NewVariableResolver(env map[string]string) *VariableResolver {
 		re:        regexp.MustCompile(`\{\{\s*(.*?)\s*\}\}`),
 		functions: make(map[string]func(...string) (string, error)),
 	}
+
+	resolver.RegisterFunc("uuid", func(s ...string) (string, error) {
+		return uuid.NewString(), nil
+	})
+
+	resolver.RegisterFunc("join", func(s ...string) (string, error) {
+		l := len(s)
+		if len(s) < 2 {
+			return "", fmt.Errorf("Expected at least 2 parameters")
+		}
+		separator := s[l-1]
+		return strings.Join(s[:l-1], separator), nil
+	})
+
+	resolver.RegisterFunc("file", func(s ...string) (string, error) {
+		if len(s) != 1 {
+			return "", fmt.Errorf("Expected 1 arguments, given %v", len(s))
+		}
+		return "", nil
+	})
+
+	resolver.RegisterFunc("now", func(s ...string) (string, error) {
+		if len(s) != 0 {
+			return "", fmt.Errorf("Expected zero arguments, given %v", len(s))
+		}
+		return "", nil
+	})
 
 	return resolver
 }
