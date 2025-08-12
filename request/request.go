@@ -10,114 +10,389 @@ import (
 	"rq/dock"
 	"rq/variable"
 	"strings"
+	"time"
 )
 
+type ExecuteOptions struct {
+	Environment    string
+	OutputFile     string
+	OutputBodyOnly bool
+	Timeout        time.Duration
+}
+
 func New(ctx *dock.RqContext, file string, protocol string) error {
-	wd := ctx.Path
-
-	f, err := os.Create(filepath.Join(wd, file+".http"))
-
-	if err != nil {
-		return err
+	if file == "" {
+		return fmt.Errorf("request name cannot be empty")
 	}
 
-	f.WriteString(`GET {{BASE_URL}}/api {{HTTP_VERSION}}
-`)
+	if protocol == "" {
+		protocol = "http"
+	}
+
+	validProtocols := map[string]bool{
+		"http":      true,
+		"ws":        true,
+		"websocket": true,
+		"grpc":      true,
+	}
+
+	if !validProtocols[protocol] {
+		return fmt.Errorf("unsupported protocol: %s (supported: http, ws, grpc)", protocol)
+	}
+
+	dir := filepath.Dir(file)
+	if dir != "." && dir != "" {
+		fullDir := filepath.Join(ctx.Path, dir)
+		if err := os.MkdirAll(fullDir, 0755); err != nil {
+			return fmt.Errorf("failed to create subdirectory %s: %w", dir, err)
+		}
+	}
+
+	filename := filepath.Base(file)
+	fullPath := filepath.Join(ctx.Path, file+"."+protocol)
+
+	if _, err := os.Stat(fullPath); err == nil {
+		return fmt.Errorf("request file already exists: %s.%s", file, protocol)
+	}
+
+	f, err := os.Create(fullPath)
+	if err != nil {
+		return fmt.Errorf("failed to create request file: %w", err)
+	}
+	defer f.Close()
+
+	template := getRequestTemplate(protocol, filename)
+	if _, err := f.WriteString(template); err != nil {
+		return fmt.Errorf("failed to write request template: %w", err)
+	}
 
 	return nil
 }
 
+func getRequestTemplate(protocol, name string) string {
+	switch protocol {
+	case "http":
+		return fmt.Sprintf(`GET {{BASE_URL}}/api/%s {{HTTP_VERSION}}
+User-Agent: {{USER_AGENT}}
+Accept: application/json
+Authorization: Bearer {{API_TOKEN}}
+
+`, name)
+
+	case "ws", "websocket":
+		return fmt.Sprintf(`# WebSocket connection to {{BASE_URL}}
+# Protocol: WebSocket
+# Endpoint: /ws/%s
+# 
+# Connection headers:
+Origin: {{BASE_URL}}
+Sec-WebSocket-Protocol: json
+
+# Messages to send:
+{"type": "subscribe", "channel": "%s"}
+{"type": "ping"}
+`, name, name)
+
+	case "grpc":
+		return fmt.Sprintf(`# gRPC service call
+# Service: {{SERVICE_NAME}}
+# Method: %s
+# 
+# Request:
+{
+  "id": "{{uuid()}}",
+  "timestamp": "{{timestamp()}}"
+}
+`, strings.Title(name))
+
+	default:
+		return fmt.Sprintf(`# %s request template
+# Edit this file to customize your %s request
+`, strings.ToUpper(protocol), protocol)
+	}
+}
+
 func Run(ctx *dock.RqContext, path string) {
-	fmt.Println("Path ", path)
+	fmt.Printf("Searching for request: %s\n", path)
+
 	requests, err := retrieveRequests(ctx.Path, path)
 	if err != nil {
-		fmt.Println("Error", err)
+		fmt.Printf("Error searching for requests: %v\n", err)
 		os.Exit(1)
 	}
+
 	switch len(requests) {
 	case 0:
-		fmt.Println("Request", path, "not found")
+		fmt.Printf("Request '%s' not found\n", path)
+		fmt.Println("Available requests:")
+		showAvailableRequests(ctx.Path)
+		os.Exit(1)
+
 	case 1:
-		fmt.Println("Run request")
-		Evaluate(ctx, path)
-	default:
-		fmt.Println("Multiple requests detected:")
-		for i := range requests {
-			fmt.Println(i, ".", requests[i])
+		fmt.Printf("Executing request: %s\n", requests[0])
+		if err := Evaluate(ctx, path); err != nil {
+			fmt.Printf("Execution failed: %v\n", err)
+			os.Exit(1)
 		}
+
+	default:
+		fmt.Printf("Multiple requests found matching '%s':\n", path)
+		for i, req := range requests {
+			fmt.Printf("  %d. %s\n", i+1, req)
+		}
+		fmt.Println("Please be more specific.")
+		os.Exit(1)
 	}
 }
 
-func retrieveRequests(path string, req string) ([]string, error) {
-	entries, err := os.ReadDir(path)
-	sep := string(os.PathSeparator)
-	if err != nil {
-		return []string{}, err
+func showAvailableRequests(basePath string) {
+	requests := findAllRequests(basePath)
+	if len(requests) == 0 {
+		fmt.Println("  No requests found in current dock")
+		fmt.Println("  Run 'rq new <name>' to create a new request")
+		return
 	}
 
-	res := []string{}
+	for _, req := range requests {
+		relPath, _ := filepath.Rel(basePath, req)
+		name := strings.TrimSuffix(relPath, filepath.Ext(relPath))
+		fmt.Printf("  %s\n", name)
+	}
+}
 
-	reqpath := strings.Split(req, sep)
+func findAllRequests(basePath string) []string {
+	var requests []string
 
-	req = reqpath[0]
-
-	for _, entry := range entries {
-		if len(reqpath) == 1 && !entry.IsDir() {
-			continue
+	filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
 		}
 
-		fileinfo := strings.Split(entry.Name(), ".")
-		if fileinfo[0] == req {
-
-			if len(reqpath) == 1 {
-				res = append(res, entry.Name())
-			} else {
-				subpath := filepath.Join(path, entry.Name())
-
-				reqs, e := retrieveRequests(subpath, strings.Join(reqpath[1:], sep))
-
-				if e != nil {
-					return res, e
-				}
-
-				res = append(res, reqs...)
+		if !info.IsDir() {
+			ext := filepath.Ext(path)
+			if ext == ".http" || ext == ".ws" || ext == ".grpc" {
+				requests = append(requests, path)
 			}
 		}
-	}
-	return res, nil
+
+		return nil
+	})
+
+	return requests
 }
+
+func retrieveRequests(basePath string, reqPath string) ([]string, error) {
+	var results []string
+
+	exactPath := filepath.Join(basePath, reqPath)
+
+	extensions := []string{".http", ".ws", ".grpc"}
+	for _, ext := range extensions {
+		fullPath := exactPath + ext
+		if _, err := os.Stat(fullPath); err == nil {
+			results = append(results, fullPath)
+		}
+	}
+
+	if len(results) > 0 {
+		return results, nil
+	}
+
+	_, err := os.ReadDir(basePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	pathSegments := strings.Split(strings.Trim(reqPath, string(os.PathSeparator)), string(os.PathSeparator))
+	currentPath := basePath
+
+	for i, segment := range pathSegments {
+		found := false
+
+		entries, err := os.ReadDir(currentPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read directory %s: %w", currentPath, err)
+		}
+
+		for _, entry := range entries {
+			if i == len(pathSegments)-1 {
+				if !entry.IsDir() {
+					name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+					if strings.HasPrefix(name, segment) {
+						fullPath := filepath.Join(currentPath, entry.Name())
+						results = append(results, fullPath)
+						found = true
+					}
+				}
+			} else {
+				if entry.IsDir() && strings.HasPrefix(entry.Name(), segment) {
+					currentPath = filepath.Join(currentPath, entry.Name())
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found && i < len(pathSegments)-1 {
+			break
+		}
+	}
+
+	return results, nil
+}
+
+func Evaluate(ctx *dock.RqContext, request string) error {
+	requestPath := resolveRequestPath(ctx.Dock, request)
+	if requestPath == "" {
+		return fmt.Errorf("request file not found: %s", request)
+	}
+
+	config, err := ctx.GetConfig(filepath.Dir(request))
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	setDefaultVariables(config)
+
+	resolver := variable.NewVariableResolver(config)
+	content, err := resolver.ResolveFile(requestPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve variables: %w", err)
+	}
+
+	ext := filepath.Ext(requestPath)
+	switch ext {
+	case ".http":
+		return executeHTTPRequest(content)
+	case ".ws":
+		return fmt.Errorf("WebSocket requests not yet implemented")
+	case ".grpc":
+		return fmt.Errorf("gRPC requests not yet implemented")
+	default:
+		return fmt.Errorf("unsupported request type: %s", ext)
+	}
+}
+
 func EvaluateWithOptions(ctx *dock.RqContext, request string, options ExecuteOptions) error {
-	requestPath := filepath.Join(ctx.Dock, request)
-	if !strings.HasSuffix(requestPath, ".http") {
-		requestPath += ".http"
+	requestPath := resolveRequestPath(ctx.Dock, request)
+	if requestPath == "" {
+		return fmt.Errorf("request file not found: %s", request)
 	}
 
 	var config map[string]string
 	var err error
+
 	if options.Environment != "" {
 		config, err = ctx.GetConfigForEnv(filepath.Dir(request), options.Environment)
 	} else {
 		config, err = ctx.GetConfig(filepath.Dir(request))
 	}
+
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
+
+	setDefaultVariables(config)
 
 	resolver := variable.NewVariableResolver(config)
 	content, err := resolver.ResolveFile(requestPath)
 	if err != nil {
-		return fmt.Errorf("failed to resolve variables in request: %w", err)
+		return fmt.Errorf("failed to resolve variables: %w", err)
 	}
 
+	ext := filepath.Ext(requestPath)
+	switch ext {
+	case ".http":
+		return executeHTTPRequestWithOptions(content, options)
+	case ".ws":
+		return fmt.Errorf("WebSocket requests not yet implemented")
+	case ".grpc":
+		return fmt.Errorf("gRPC requests not yet implemented")
+	default:
+		return fmt.Errorf("unsupported request type: %s", ext)
+	}
+}
+
+func resolveRequestPath(dockPath, request string) string {
+	extensions := []string{".http", ".ws", ".grpc"}
+
+	basePath := filepath.Join(dockPath, request)
+
+	for _, ext := range extensions {
+		fullPath := basePath + ext
+		if _, err := os.Stat(fullPath); err == nil {
+			return fullPath
+		}
+	}
+
+	if filepath.Ext(request) != "" {
+		fullPath := filepath.Join(dockPath, request)
+		if _, err := os.Stat(fullPath); err == nil {
+			return fullPath
+		}
+	}
+
+	return ""
+}
+
+func setDefaultVariables(config map[string]string) {
+	defaults := map[string]string{
+		"HTTP_VERSION": "HTTP/1.1",
+		"USER_AGENT":   "rq/1.0.0",
+		"ACCEPT":       "application/json",
+	}
+
+	for key, value := range defaults {
+		if _, exists := config[key]; !exists {
+			config[key] = value
+		}
+	}
+}
+
+func executeHTTPRequest(content string) error {
 	httpReq, err := ParseHttpRequest(content)
 	if err != nil {
 		return fmt.Errorf("failed to parse HTTP request: %w", err)
 	}
 
+	if err := validateHTTPRequest(httpReq); err != nil {
+		return fmt.Errorf("invalid HTTP request: %w", err)
+	}
+
 	fmt.Printf("Executing %s %s\n", httpReq.Method, httpReq.URL)
+
 	response, err := httpReq.Execute()
 	if err != nil {
-		return fmt.Errorf("failed to execute request: %w", err)
+		return fmt.Errorf("request execution failed: %w", err)
+	}
+
+	response.Print()
+	return nil
+}
+
+func executeHTTPRequestWithOptions(content string, options ExecuteOptions) error {
+	httpReq, err := ParseHttpRequest(content)
+	if err != nil {
+		return fmt.Errorf("failed to parse HTTP request: %w", err)
+	}
+
+	if err := validateHTTPRequest(httpReq); err != nil {
+		return fmt.Errorf("invalid HTTP request: %w", err)
+	}
+
+	if options.Timeout > 0 {
+		httpReq.Timeout = options.Timeout
+	}
+
+	fmt.Printf("Executing %s %s", httpReq.Method, httpReq.URL)
+	if options.Environment != "" {
+		fmt.Printf(" (env: %s)", options.Environment)
+	}
+	fmt.Println()
+
+	response, err := httpReq.Execute()
+	if err != nil {
+		return fmt.Errorf("request execution failed: %w", err)
 	}
 
 	if options.OutputFile != "" {
@@ -126,12 +401,39 @@ func EvaluateWithOptions(ctx *dock.RqContext, request string, options ExecuteOpt
 		} else {
 			err = response.SaveToFile(options.OutputFile)
 		}
+
 		if err != nil {
 			return fmt.Errorf("failed to save output: %w", err)
 		}
-		fmt.Printf("Response saved to %s\n", options.OutputFile)
+
+		fmt.Printf("Response saved to: %s\n", options.OutputFile)
 	} else {
 		response.Print()
+	}
+
+	return nil
+}
+
+func validateHTTPRequest(req *HttpRequest) error {
+	if req.Method == "" {
+		return fmt.Errorf("HTTP method is required")
+	}
+
+	if req.URL == "" {
+		return fmt.Errorf("URL is required")
+	}
+
+	validMethods := map[string]bool{
+		"GET": true, "POST": true, "PUT": true, "DELETE": true,
+		"HEAD": true, "OPTIONS": true, "PATCH": true, "TRACE": true,
+	}
+
+	if !validMethods[strings.ToUpper(req.Method)] {
+		return fmt.Errorf("invalid HTTP method: %s", req.Method)
+	}
+
+	if !strings.Contains(req.URL, "://") && !strings.HasPrefix(req.URL, "/") {
+		return fmt.Errorf("invalid URL format: %s", req.URL)
 	}
 
 	return nil

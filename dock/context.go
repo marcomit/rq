@@ -67,7 +67,6 @@ func loadConfig(path string) (map[string]string, error) {
 
 	file, err := os.ReadFile(path)
 	if err != nil {
-		// Return empty config if file doesn't exist, but propagate other errors
 		if os.IsNotExist(err) {
 			return res, nil
 		}
@@ -79,12 +78,10 @@ func loadConfig(path string) (map[string]string, error) {
 	for lineNum, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		// Split on first '=' only
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
 			return res, fmt.Errorf("invalid format at line %d: missing '=' character", lineNum+1)
@@ -147,7 +144,7 @@ func (ctx *RqContext) setDockRoot() {
 		fmt.Printf("Error: %s is not a valid RQ environment\n", ctx.Path)
 		os.Exit(1)
 	}
-	ctx.Dock = root // Set Dock field, not Path
+	ctx.Dock = root
 }
 
 func GetContext() *RqContext {
@@ -182,4 +179,3 @@ func (ctx *RqContext) GetConfigForEnv(relpath, env string) (map[string]string, e
 
 	return configs, nil
 }
-
