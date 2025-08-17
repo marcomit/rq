@@ -275,7 +275,7 @@ rq run users --env prod   # Uses production env
 rq is built with Go and focuses on simplicity and developer experience. Contributions welcome!
 
 ```bash
-git clone https://github.com/yourname/rq.git
+git clone https://github.com/marcomit/rq.git
 cd rq
 go run main.go dock init test
 go run main.go new hello

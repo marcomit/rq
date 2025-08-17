@@ -10,44 +10,7 @@ import (
 	"strings"
 )
 
-func Parse(args []string) {
-	if len(args) == 0 {
-		fmt.Println("Error: dock command requires subcommand")
-		fmt.Println("Available commands: init, use, list, status")
-		os.Exit(1)
-	}
-
-	switch args[0] {
-	case "init":
-		if len(args) < 2 {
-			fmt.Println("Error: dock init requires a name")
-			fmt.Println("Usage: rq dock init <name>")
-			os.Exit(1)
-		}
-		createDock(args[1])
-
-	case "use":
-		if len(args) < 2 {
-			fmt.Println("Error: dock use requires a name")
-			fmt.Println("Usage: rq dock use <name>")
-			os.Exit(1)
-		}
-		setCurrentDock(args[1])
-
-	case "list":
-		listDocks()
-
-	case "status":
-		showDockStatus()
-
-	default:
-		fmt.Printf("Error: unknown dock command '%s'\n", args[0])
-		fmt.Println("Available commands: init, use, list, status")
-		os.Exit(1)
-	}
-}
-
-func setCurrentDock(name string) {
+func SetCurrentDock(name string) {
 	if _, err := os.Stat(name); os.IsNotExist(err) {
 		fmt.Printf("Error: dock '%s' does not exist\n", name)
 		os.Exit(1)
@@ -86,7 +49,7 @@ func setCurrentDock(name string) {
 	fmt.Printf("Switched to dock: %s\n", name)
 }
 
-func createDock(name string) {
+func CreateDock(name string) {
 	fmt.Printf("Creating dock '%s'...\n", name)
 
 	if _, err := os.Stat(name); err == nil {
@@ -145,7 +108,7 @@ HTTP_VERSION=HTTP/1.1
 	fmt.Println("Edit the .env file to configure your environment variables")
 }
 
-func listDocks() {
+func List() {
 	wd, err := os.Getwd()
 	if err != nil {
 		fmt.Printf("Error: failed to get working directory: %v\n", err)
@@ -204,7 +167,7 @@ func findDocks(root string) []string {
 	return docks
 }
 
-func showDockStatus() {
+func ShowStatus() {
 	wd, err := os.Getwd()
 	if err != nil {
 		fmt.Printf("Error: failed to get working directory: %v\n", err)

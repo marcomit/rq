@@ -33,6 +33,12 @@ type HttpResponse struct {
 	Duration   time.Duration
 	Size       int64
 }
+type ExecuteOptions struct {
+	Environment    string
+	OutputFile     string
+	OutputBodyOnly bool
+	Timeout        time.Duration
+}
 
 func ParseHttpRequest(content string) (*HttpRequest, error) {
 	if strings.TrimSpace(content) == "" {
@@ -390,4 +396,94 @@ func writeIndent(sb *strings.Builder, level int) {
 	for i := 0; i < level*2; i++ {
 		sb.WriteRune(' ')
 	}
+}
+
+func executeHTTPRequest(content string) error {
+	httpReq, err := ParseHttpRequest(content)
+	if err != nil {
+		return fmt.Errorf("failed to parse HTTP request: %w", err)
+	}
+
+	if err := validateHTTPRequest(httpReq); err != nil {
+		return fmt.Errorf("invalid HTTP request: %w", err)
+	}
+
+	fmt.Printf("Executing %s %s\n", httpReq.Method, httpReq.URL)
+
+	response, err := httpReq.Execute()
+	if err != nil {
+		return fmt.Errorf("request execution failed: %w", err)
+	}
+
+	response.Print()
+	return nil
+}
+
+func executeHTTPRequestWithOptions(content string, options ExecuteOptions) error {
+	httpReq, err := ParseHttpRequest(content)
+	if err != nil {
+		return fmt.Errorf("failed to parse HTTP request: %w", err)
+	}
+
+	if err := validateHTTPRequest(httpReq); err != nil {
+		return fmt.Errorf("invalid HTTP request: %w", err)
+	}
+
+	if options.Timeout > 0 {
+		httpReq.Timeout = options.Timeout
+	}
+
+	fmt.Printf("Executing %s %s", httpReq.Method, httpReq.URL)
+	if options.Environment != "" {
+		fmt.Printf(" (env: %s)", options.Environment)
+	}
+	fmt.Println()
+
+	response, err := httpReq.Execute()
+	if err != nil {
+		return fmt.Errorf("request execution failed: %w", err)
+	}
+
+	if options.OutputFile != "" {
+		if options.OutputBodyOnly {
+			err = os.WriteFile(options.OutputFile, []byte(response.Body), 0644)
+		} else {
+			err = response.SaveToFile(options.OutputFile)
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to save output: %w", err)
+		}
+
+		fmt.Printf("Response saved to: %s\n", options.OutputFile)
+	} else {
+		response.Print()
+	}
+
+	return nil
+}
+
+func validateHTTPRequest(req *HttpRequest) error {
+	if req.Method == "" {
+		return fmt.Errorf("HTTP method is required")
+	}
+
+	if req.URL == "" {
+		return fmt.Errorf("URL is required")
+	}
+
+	validMethods := map[string]bool{
+		"GET": true, "POST": true, "PUT": true, "DELETE": true,
+		"HEAD": true, "OPTIONS": true, "PATCH": true, "TRACE": true,
+	}
+
+	if !validMethods[strings.ToUpper(req.Method)] {
+		return fmt.Errorf("invalid HTTP method: %s", req.Method)
+	}
+
+	if !strings.Contains(req.URL, "://") && !strings.HasPrefix(req.URL, "/") {
+		return fmt.Errorf("invalid URL format: %s", req.URL)
+	}
+
+	return nil
 }
