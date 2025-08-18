@@ -4,11 +4,49 @@
 package dock
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/marcomit/args"
 )
+
+func Setup(app *args.Parser) {
+	dock := app.Command("dock", "Dock command")
+
+	dock.Command("init", "Initialize an rq dock").Positional("name").
+		Action(func(r *args.Result) error {
+			if len(r.Positionals) == 0 {
+				return errors.New("Expected one positional argument")
+			}
+			CreateDock(r.Positionals[0])
+			return nil
+		})
+
+	dock.Command("use", "Change the active dock").Positional("name").
+		Action(func(r *args.Result) error {
+			if len(r.Positionals) == 0 {
+				return errors.New("Expected one positional argument")
+			}
+			SetCurrentDock(r.Positionals[0])
+			return nil
+		})
+
+	dock.Command("list", "Lists all rq docks").
+		Action(func(r *args.Result) error {
+			List()
+			return nil
+		})
+
+	dock.Command("status", "Check the status of the dock").
+		Action(func(r *args.Result) error {
+			ShowStatus()
+			return nil
+		})
+
+}
 
 func SetCurrentDock(name string) {
 	if _, err := os.Stat(name); os.IsNotExist(err) {

@@ -10,6 +10,11 @@ import (
 	"strings"
 )
 
+type VariableContext struct {
+	block string
+	args  []string
+}
+
 type VariableResolver struct {
 	env       map[string]string
 	functions map[string]func(...string) (string, error)
@@ -108,9 +113,16 @@ func (resolver *VariableResolver) evaluateExpression(expression string) (string,
 
 	if variable, ok := resolver.env[expression]; ok {
 		return variable, nil
+	} else if isString(expression) {
+		return expression[1 : len(expression)-1], nil
 	}
 
 	return "", fmt.Errorf("variable '%s' not found", expression)
+}
+
+func isString(expression string) bool {
+	re := regexp.MustCompile(`^'[^']*'$|^"[^"]*"$`)
+	return re.MatchString(expression)
 }
 
 func (resolver *VariableResolver) getParams(params string) []string {

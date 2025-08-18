@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Marco Menegazzi
 // Licensed under the BSD 3-Clause License.
 // See the LICENSE file in the project root for full license information.
-package request
+package http
 
 import (
 	"crypto/tls"
@@ -40,7 +40,16 @@ type ExecuteOptions struct {
 	Timeout        time.Duration
 }
 
-func ParseHttpRequest(content string) (*HttpRequest, error) {
+func HttpTemplate(name string) string {
+	return fmt.Sprintf(`GET {{BASE_URL}}/api/%s {{HTTP_VERSION}}
+User-Agent: {{USER_AGENT}}
+Accept: application/json
+Authorization: Bearer {{API_TOKEN}}
+
+`, name)
+}
+
+func Parse(content string) (*HttpRequest, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, fmt.Errorf("empty request content")
 	}
@@ -145,6 +154,20 @@ func (req *HttpRequest) Execute() (*HttpResponse, error) {
 	}
 
 	return response, nil
+}
+
+func setDefaultVariables(config map[string]string) {
+	defaults := map[string]string{
+		"HTTP_VERSION": "HTTP/1.1",
+		"USER_AGENT":   "rq/1.0.0",
+		"ACCEPT":       "application/json",
+	}
+
+	for key, value := range defaults {
+		if _, exists := config[key]; !exists {
+			config[key] = value
+		}
+	}
 }
 
 func (req *HttpRequest) prepareURL() error {
@@ -398,34 +421,13 @@ func writeIndent(sb *strings.Builder, level int) {
 	}
 }
 
-func executeHTTPRequest(content string) error {
-	httpReq, err := ParseHttpRequest(content)
+func Run(content string, options ExecuteOptions) error {
+	httpReq, err := Parse(content)
 	if err != nil {
 		return fmt.Errorf("failed to parse HTTP request: %w", err)
 	}
 
-	if err := validateHTTPRequest(httpReq); err != nil {
-		return fmt.Errorf("invalid HTTP request: %w", err)
-	}
-
-	fmt.Printf("Executing %s %s\n", httpReq.Method, httpReq.URL)
-
-	response, err := httpReq.Execute()
-	if err != nil {
-		return fmt.Errorf("request execution failed: %w", err)
-	}
-
-	response.Print()
-	return nil
-}
-
-func executeHTTPRequestWithOptions(content string, options ExecuteOptions) error {
-	httpReq, err := ParseHttpRequest(content)
-	if err != nil {
-		return fmt.Errorf("failed to parse HTTP request: %w", err)
-	}
-
-	if err := validateHTTPRequest(httpReq); err != nil {
+	if err := validate(httpReq); err != nil {
 		return fmt.Errorf("invalid HTTP request: %w", err)
 	}
 
@@ -433,7 +435,8 @@ func executeHTTPRequestWithOptions(content string, options ExecuteOptions) error
 		httpReq.Timeout = options.Timeout
 	}
 
-	fmt.Printf("Executing %s %s", httpReq.Method, httpReq.URL)
+	fmt.Printf("Executing %s %s\n", httpReq.Method, httpReq.URL)
+
 	if options.Environment != "" {
 		fmt.Printf(" (env: %s)", options.Environment)
 	}
@@ -459,11 +462,10 @@ func executeHTTPRequestWithOptions(content string, options ExecuteOptions) error
 	} else {
 		response.Print()
 	}
-
 	return nil
 }
 
-func validateHTTPRequest(req *HttpRequest) error {
+func validate(req *HttpRequest) error {
 	if req.Method == "" {
 		return fmt.Errorf("HTTP method is required")
 	}

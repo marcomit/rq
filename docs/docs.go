@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"rq/dock"
+
+	"github.com/marcomit/args"
 )
 
 type DocComment struct {
@@ -77,6 +79,24 @@ type DockDocs struct {
 	Groups      map[string][]RequestDoc `json:"groups"`
 	GeneratedAt time.Time               `json:"generated_at"`
 	DockPath    string                  `json:"dock_path"`
+}
+
+func Setup(app *args.Parser) {
+	docs := app.Command("docs", "Manage the documentation of the dock")
+
+	docs.
+		Command("generate", "Generate the documentation").
+		Option("output", "o", "Output path of the documentation")
+
+	docs.
+		Command("serve", "Serve the documentation as webapp").
+		Option("port", "p", "Server port")
+
+	docs.
+		Command("export", "Export documentation").
+		Option("output", "o", "Output path of the documentation").
+		Option("format", "format", "Format type of the documentation")
+
 }
 
 func Parse(args []string) {

@@ -4,12 +4,17 @@
 package request
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"rq/dock"
 	"rq/variable"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/marcomit/args"
 )
 
 func New(ctx *dock.RqContext, file string, protocol string) error {
@@ -62,45 +67,98 @@ func New(ctx *dock.RqContext, file string, protocol string) error {
 	return nil
 }
 
+func Setup(app *args.Parser) {
+	app.
+		Command("run", "Runs the specified request").
+		Positional("name").
+		Option("env", "e", "Environment").
+		Option("output", "o", "Choose the file to write the response").
+		Option("timeout", "t", "Set the timeout to abort the request").
+		Flag("output-body", "ob", "If flagged it saves only the body (avoid saving headers)").
+		Action(func(r *args.Result) error {
+			if len(r.Positionals) == 0 {
+				return errors.New("Missing name of the request to run")
+			}
+			name := r.Positionals[0]
+
+			options := ExecuteOptions{
+				Timeout: 30 * time.Second,
+			}
+
+			if env, ok := r.Options["env"]; ok {
+				options.Environment = env
+			}
+
+			if output, ok := r.Options["output"]; ok {
+				options.OutputFile = output
+			}
+			if r.Flag("output-body") {
+				options.OutputBodyOnly = true
+			}
+
+			if timeout, ok := r.Options["timeout"]; ok {
+				val, err := strconv.Atoi(timeout)
+				if err != nil {
+					return errors.New("Timeout must be a number")
+				}
+				options.Timeout = (time.Duration(val) * time.Second)
+			}
+
+			ctx := dock.GetContext()
+
+			var err error
+			if options.Environment != "" || options.OutputFile != "" || options.Timeout != 30*time.Second {
+				err = EvaluateWithOptions(ctx, name, options)
+			} else {
+				err = Evaluate(ctx, name)
+			}
+			return err
+		})
+
+	app.Command("new", "Create a new request").
+		Positional("name").
+		Option("protocol", "p", "Set the protocol for the request", "http", "tcp").
+		Action(func(r *args.Result) error {
+			if len(r.Positionals) == 0 {
+				return errors.New("Missing name of the request")
+			}
+			name := r.Positionals[0]
+			protocol := "http"
+			if _, ok := r.Options["protocol"]; ok {
+				protocol = r.Options["protocol"]
+			}
+
+			ctx := dock.GetContext()
+			err := New(ctx, name, protocol)
+			if err != nil {
+				fmt.Printf("Error creating request: %v\n", err)
+				os.Exit(1)
+			}
+
+			fmt.Printf("Created request: %s.%s\n", name, protocol)
+			fmt.Printf("Edit the file to customize your request\n")
+			return nil
+		})
+
+	app.Command("show", "Shows the raw content to execute").
+		Positional("name").
+		Action(func(r *args.Result) error {
+			ctx := dock.GetContext()
+
+			if ctx == nil {
+				return errors.New("You're not inside a valid dock")
+			}
+
+			return nil
+		})
+}
+
 func getRequestTemplate(protocol, name string) string {
 	switch protocol {
 	case "http":
-		return fmt.Sprintf(`GET {{BASE_URL}}/api/%s {{HTTP_VERSION}}
-User-Agent: {{USER_AGENT}}
-Accept: application/json
-Authorization: Bearer {{API_TOKEN}}
-
-`, name)
-
-	case "ws", "websocket":
-		return fmt.Sprintf(`# WebSocket connection to {{BASE_URL}}
-# Protocol: WebSocket
-# Endpoint: /ws/%s
-# 
-# Connection headers:
-Origin: {{BASE_URL}}
-Sec-WebSocket-Protocol: json
-
-# Messages to send:
-{"type": "subscribe", "channel": "%s"}
-{"type": "ping"}
-`, name, name)
-
-	case "grpc":
-		return fmt.Sprintf(`# gRPC service call
-# Service: {{SERVICE_NAME}}
-# Method: %s
-# 
-# Request:
-{
-  "id": "{{uuid()}}",
-  "timestamp": "{{timestamp()}}"
-}
-`, strings.Title(name))
-
-	case "tcp":
-		return fmt.Sprintf(`# The first line is the url of connection and the rest is the byte to send
-{{BASE_URL}}`)
+		return HttpTemplate(name)
+	case "ftp":
+		return FtpTemplate()
 	default:
 		return fmt.Sprintf(`# %s request template
 # Edit this file to customize your %s request
@@ -296,14 +354,10 @@ func EvaluateWithOptions(ctx *dock.RqContext, request string, options ExecuteOpt
 		return fmt.Errorf("failed to resolve variables: %w", err)
 	}
 
-	ext := filepath.Ext(requestPath)
+	ext := filepath.Ext(requestPath)[1:]
 	switch ext {
-	case ".http":
+	case "http":
 		return executeHTTPRequestWithOptions(content, options)
-	case ".ws":
-		return fmt.Errorf("WebSocket requests not yet implemented")
-	case ".grpc":
-		return fmt.Errorf("gRPC requests not yet implemented")
 	default:
 		return fmt.Errorf("unsupported request type: %s", ext)
 	}
@@ -329,18 +383,4 @@ func resolveRequestPath(dockPath, request string) string {
 	}
 
 	return ""
-}
-
-func setDefaultVariables(config map[string]string) {
-	defaults := map[string]string{
-		"HTTP_VERSION": "HTTP/1.1",
-		"USER_AGENT":   "rq/1.0.0",
-		"ACCEPT":       "application/json",
-	}
-
-	for key, value := range defaults {
-		if _, exists := config[key]; !exists {
-			config[key] = value
-		}
-	}
 }
